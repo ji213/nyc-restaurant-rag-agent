@@ -10,6 +10,9 @@ Thumbs.db
 backend/.env
 .env
 
+# Logs
+backend/logs/
+
 # Python Virtual Environments (added trailing slash)
 backend/venv/
 venv/

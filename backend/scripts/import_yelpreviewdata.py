@@ -1,10 +1,13 @@
 """
+
+    import_yelpreviewdata.py
     Process to Import yelp data from kaggle dataset file. 
     Plan to migrate this process to a live API feed once we get an end-to-end MVP
 
 """
 
 import os
+import sys
 import json
 import ast
 import time
@@ -17,11 +20,6 @@ from pinecone import Pinecone
 from openai import OpenAI
 from utils.data_transformers import process_philly_restaurant_data
 from utils.pipeline_workers import process_review_pipeline
-
-
-## Configure final version of functions used to clean/normalize import data
-## import that file into this file once done
-## generate test script to test effectiveness of process and load top 100 ( we can adapt our current process)
 
 
 """ 
@@ -45,20 +43,68 @@ Each time a thread successfully completes a batch, it logs the last successfully
 ## need to add logic after the main processing loop finishes that checks
 ## if current_batch has items, submit them to the executor one last time before exiting
 
+
+# Create a folder for logs if it doesn't exist
+os.makedirs("logs", exist_ok=True)
+
+# Reconfigure stdout/stderr to support emojis natively in the Windows console
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+# Configure the logging engine
+logging.basicConfig(
+    level=logging.INFO,  # Captures INFO, WARNING, and ERROR logs
+    format="%(asctime)s [%(threadName)s] %(levelname)s: %(message)s",
+    handlers=[
+        # StreamHandler will now inherit the updated sys.stdout encoding
+        # keep this commented out to keep the terminal calm
+        # logging.StreamHandler(sys.stdout),                      
+        
+        # Explicitly pass encoding="utf-8" to the FileHandler
+        logging.FileHandler("logs/pipeline_run.log", encoding="utf-8")
+    ]
+)
+
 def main():
+
+    # 1. Load environment variables (API keys)
+    load_dotenv()
+
     # build out path to business file
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     biz_path = os.path.join(base_dir, 'Data', 'yelp_academic_dataset_business.json')
 
     # gather philly business data
     # should I put a try exception as E block outside of this?
-    
+    logging.info("⏳ Step 1: Processing Philadelphia restaurant maps...")
+    print("⏳ Step 1: Processing Philadelphia restaurant maps...")
     philly_restaurant_map = process_philly_restaurant_data(biz_path)
+    logging.info(f"✅ Step 1 Complete: {len(philly_restaurant_map)} restaurants loaded.")
+    print(f"✅ Step 1 Complete: {len(philly_restaurant_map)} restaurants loaded.")
 
-    # loop through review file 1 by one
-    # normalize payloads
-    # append payload to current batch
-    # start processing when batch gets to 1000; send processing to thread once it is open
+    logging.info("⏳ Step 2: Initializing API clients...")
+    print("⏳ Step 2: Initializing API clients...")
+    try:
+        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+        # Connect to your specific vector index
+        index = pc.Index(os.getenv("PINECONE_INDEX_NAME", "philly-restaurants"))
+
+        logging.info("✅ Step 2 Complete: API connections securely established.")
+        print("✅ Step 2 Complete: API connections securely established.")
+
+    except Exception as e:
+        logging.critical(f"❌ CRITICAL INITIALIZATION FAILURE: Could not connect to downstream APIs. Error: {str(e)}")
+        # Exit execution immediately since the pipeline cannot function without valid API clients
+        return
+
+    
+    # 3. Hand everything off to the parallel processing engine
+    logging.info("🚀 Step 3: Launching parallel review processing pipeline...")
+    print("🚀 Step 3: Launching parallel review processing pipeline...")
+    process_review_pipeline(philly_restaurant_map, openai_client, index)
 
 
 

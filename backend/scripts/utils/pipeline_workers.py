@@ -1,44 +1,80 @@
 import os
 import json
 import logging
+import time
 from dotenv import load_dotenv
 from pinecone import Pinecone
+from pinecone import Index  # Import the class definition
 from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor
 from utils.data_transformers import transform_review_to_payload
 import threading
 
-# Create a folder for logs if it doesn't exist
-os.makedirs("logs", exist_ok=True)
 
-# Configure the logging engine
-logging.basicConfig(
-    level=logging.INFO,  # Captures INFO, WARNING, and ERROR logs
-    format="%(asctime)s [%(threadName)s] %(levelname)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),                      # Streams clean logs directly to your terminal console
-        logging.FileHandler("logs/pipeline_run.log")  # Simultaneously appends everything to a file
-    ]
-)
-
-def process_and_upload_batch_worker(openai_client, index, batch_data, namespace, failure_log_path, semaphore):
+def process_and_upload_batch_worker(openai_client: OpenAI, index: Index, batch_data, namespace, failure_log_path, semaphore):
     """
     Worker function executed inside background threads.
     """
     # Work on payload generation before we do this
 
+    """
+    Simulated worker function to smoke-test multi-threaded execution boundaries,
+    batch slicing stability, and semaphore resource throttling.
+    """
+
+    # Identify exactly which worker thread is executing this task
+    thread_name = threading.current_thread().name
+    
+    try:
+        logging.info(f"▶️ [{thread_name}] Starting processing simulation for batch of size {len(batch_data)}...")
+        
+        # 1. DSA Concept Validation: Inspecting the structural inputs
+        if len(batch_data) > 0:
+            first_row = batch_data[0]
+            # Safely pluck metadata properties for our trace log
+            review_id = first_row.get("id", "UNKNOWN_ID")
+            biz_name = first_row.get("metadata", {}).get("restaurant_name", "UNKNOWN_RESTAURANT")
+            
+            logging.info(
+                f"📊 [{thread_name}] Sample Head Record Details -> "
+                f"Target Namespace: '{namespace}' | "
+                f"First Review ID: {review_id} | "
+                f"Establishment: '{biz_name}'"
+            )
+        else:
+            logging.warning(f"⚠️ [{thread_name}] Received an unexpected empty batch.")
+
+        # 2. Simulate Network Latency (Time Complexity Simulation)
+        # We simulate a 1.5-second network roundtrip delay for embedding generation + DB upsert
+        logging.info(f"⏳ [{thread_name}] Simulating embedding generation and Pinecone upsert latency...")
+        time.sleep(1.5)
+        
+        logging.info(f"✅ [{thread_name}] Batch transmission completed successfully.")
+
+    except Exception as worker_error:
+        # Catch and trace any issues without crashing the main orchestrator thread
+        logging.error(f"❌ [{thread_name}] Critical error during simulated worker execution: {str(worker_error)}")
+        
+    finally:
+        # 🧠 DSA Crucial Primitive: Safe Resource Release
+        # Releasing the semaphore inside the 'finally' block ensures that even if an exception 
+        # explodes above, this thread slot is unlocked, allowing the main loop to continue.
+        semaphore.release()
+        logging.info(f"🔓 [{thread_name}] Semaphore released. Active thread slots replenished.")
 
 
 
-def process_review_pipeline(business_map: dict, openai_client: OpenAI, index) ->None:
+
+def process_review_pipeline(business_map: dict, openai_client: OpenAI, index: Index) ->None:
     # Business Map passed in
+    # do i need to load_dotenv?
+    load_dotenv()
 
     # establish path for review file
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
     review_path = os.path.join(base_dir, 'Data', 'yelp_academic_dataset_review.json')
 
     # Configuration Parameters
-    # Maybe we can store these in env file
     MAX_CONCURRENT_REQUESTS = int(os.getenv("MAX_CONCURRENT_REQUESTS", 5)) 
     BATCH_SIZE = int(os.getenv("BATCH_SIZE", 1000))
 
@@ -88,11 +124,19 @@ def process_review_pipeline(business_map: dict, openai_client: OpenAI, index) ->
 
                                 #Refresh variable for next batch
                                 current_batch = []
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as decode_err:
                         # Log or print malformed row warning
+                        # Open with safe utf-8 append parameters
+                        with open(failure_log_path, "a", encoding="utf-8") as f:
+                            f.write(f"--- Parsing Error at Line {line_count} ---\n")
+                            f.write(f"Error details: {str(decode_err)}\n\n")
+
                         continue
                     except Exception as row_error:
-                        # Catch other parsing edge cases safely
+                        with open(failure_log_path, "a", encoding="utf-8") as f:
+                            f.write(f"--- Unexpected Error at Line {line_count} ---\n")
+                            f.write(f"Error details: {str(row_error)}\n\n")
+
                         continue
 
                 #Final sweep for trailing records
