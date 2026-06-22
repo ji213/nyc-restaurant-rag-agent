@@ -19,6 +19,8 @@ def retry_operation(operation, max_retries=3, initial_delay=2):
     if initial_delay <= 0:
         initial_delay = 1
 
+    max_retries = int(max_retries)
+
     delay = initial_delay
     for attempt in range(max_retries):
         try:
@@ -69,7 +71,7 @@ def process_and_upload_batch_worker(openai_client: OpenAI, index: Index, batch_d
 
         # list to assemble final payload for Pinecone
         output_payload = []
-        chunk_size = os.getenv("PINECONE_CHUNK_SIZE")
+        chunk_size = int(os.getenv("PINECONE_CHUNK_SIZE"))
 
         # Extract just the review text strings
         review_to_embed = [row["metadata"]["review_text"] for row in batch_data]
@@ -82,9 +84,9 @@ def process_and_upload_batch_worker(openai_client: OpenAI, index: Index, batch_d
         ))
 
         # Map vector result from response back by positional index
-        for index, row in enumerate(batch_data):
+        for i, row in enumerate(batch_data):
             # extract the matching vector matrix
-            vector_matrix = response.data[index].embedding
+            vector_matrix = response.data[i].embedding
 
             # Structure the item exactly how Pinecone's client expects it
             vector_item = {
