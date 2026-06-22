@@ -60,7 +60,9 @@ BATCH_SIZE=1000               # Number of rows compiled before handing off to a 
 
 1. Ensure your .env file is fully populated in the project root.
 2. Place the Yelp academic datasets in the /Data directory.
-3. Launch the orchestrator script:
+3. Launch the orchestrator script or run bat file (run_backend_pipeline.bat):
    python scripts/import_yelpreviewdata.py
+
+
 
 ========================================================================
